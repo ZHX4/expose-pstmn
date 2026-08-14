@@ -20,8 +20,14 @@ function inferRegion(apiBaseUrl: string | undefined): "us" | "eu" | "unknown" {
 }
 
 function normalizeApiBaseUrl(value: string | undefined, region: "us" | "eu" | "unknown"): string {
-  if (value) return value.replace(/\/$/, "");
-  return region === "eu" ? "https://api.eu.postman.com" : "https://api.postman.com";
+  const selected = value ?? (region === "eu" ? "https://api.eu.postman.com" : "https://api.postman.com");
+
+  try {
+    const parsed = new URL(selected);
+    return parsed.origin;
+  } catch {
+    return selected.replace(/\/$/, "");
+  }
 }
 
 function parseVersion(stdout: string): string | undefined {
@@ -31,8 +37,7 @@ function parseVersion(stdout: string): string | undefined {
 
 function sanitizeBaseUrl(value: string): string {
   try {
-    const parsed = new URL(value);
-    return `${parsed.protocol}//${parsed.host}`;
+    return new URL(value).origin;
   } catch {
     return "invalid-url";
   }
@@ -42,7 +47,9 @@ function isOfficialPostmanApiHost(value: string): boolean {
   try {
     const parsed = new URL(value);
     return parsed.protocol === "https:" &&
-      (parsed.hostname === "api.postman.com" || parsed.hostname === "api.eu.postman.com");
+      (parsed.hostname === "api.postman.com" || parsed.hostname === "api.eu.postman.com") &&
+      !parsed.username &&
+      !parsed.password;
   } catch {
     return false;
   }
@@ -54,7 +61,7 @@ async function checkPostmanApi(apiKey: string | undefined, apiBaseUrl: string): 
     return {
       name: "Postman API",
       status: "error",
-      detail: "POSTMAN_API_BASE_URL must use the official Postman API hostname (api.postman.com or api.eu.postman.com).",
+      detail: "POSTMAN_API_BASE_URL must use the official HTTPS Postman API hostname (api.postman.com or api.eu.postman.com) without query or credential data.",
       endpoint: sanitizeBaseUrl(apiBaseUrl),
     };
   }
@@ -110,7 +117,8 @@ export async function discover(): Promise<DiscoveryReport> {
   const apiKey = process.env.POSTMAN_API_KEY;
   const configuredApiBaseUrl = process.env.POSTMAN_API_BASE_URL;
   const configuredRegion = process.env.POSTMAN_REGION === "eu" ? "eu" : undefined;
-  const region = configuredRegion ?? inferRegion(configuredApiBaseUrl);
+  const inferredRegion = inferRegion(configuredApiBaseUrl);
+  const region = configuredRegion ?? (inferredRegion === "eu" || inferredRegion === "us" ? inferredRegion : "us");
   const apiBaseUrl = normalizeApiBaseUrl(configuredApiBaseUrl, region);
 
   const cli = await runCommand("postman", ["--version"]);
@@ -165,9 +173,9 @@ export async function discover(): Promise<DiscoveryReport> {
         ? "Postman API authentication is not currently available."
         : "Postman API reachability or configuration could not be verified.",
     protocolReadyCount > 0
-      ? `${protocolReadyCount} Postman MCP endpoint(s) completed an MCP initialize + tools/list handshake.`
-      : "No Postman MCP endpoint completed an MCP initialize + tools/list handshake with the configured authentication path.",
-    "The US remote MCP server supports OAuth, while the EU remote server requires a Postman API key. This CLI does not initiate an interactive OAuth browser flow during discovery.",
+      ? `${protocolReadyCount} Postman MCP endpoint(s) completed an MCP initialize + notifications/initialized + tools/list handshake.`
+      : "No Postman MCP endpoint completed a full MCP initialization and tools/list handshake with the configured authentication path.",
+    "The US remote MCP server supports OAuth, while the EU remote server requires a Postman API key. This CLI does not initiate an interactive OAuth browser flow.",
     learnConfiguration.status === "unknown"
       ? "The documented Learn MCP configuration is acknowledged but not probed because Postman's current remote endpoint table does not publish a distinct Learn URL."
       : "Learn configuration was verified.",
