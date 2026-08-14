@@ -15,16 +15,6 @@ interface McpRequestResult {
   readonly detail: string;
 }
 
-interface McpSession {
-  readonly sessionId?: string;
-  readonly initializeSucceeded: boolean;
-  readonly toolsListSucceeded: boolean;
-  readonly toolCount?: number;
-  readonly httpStatus: number | null;
-  readonly authenticationMode: "api-key" | "oauth" | "none" | "unknown";
-  readonly detail: string;
-}
-
 function parseSseBody(text: string): unknown {
   const events = text
     .split(/\r?\n\r?\n/)
@@ -62,12 +52,8 @@ async function requestMcp(
       "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
     };
 
-    if (apiKey) {
-      headers.Authorization = `Bearer ${apiKey}`;
-    }
-    if (sessionId) {
-      headers["Mcp-Session-Id"] = sessionId;
-    }
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    if (sessionId) headers["Mcp-Session-Id"] = sessionId;
 
     const response = await fetch(endpoint, {
       method: "POST",
@@ -77,7 +63,8 @@ async function requestMcp(
     });
 
     const text = await response.text();
-    const parsed = response.headers.get("content-type")?.includes("text/event-stream")
+    const contentType = response.headers.get("content-type") ?? "";
+    const parsed = contentType.includes("text/event-stream")
       ? parseSseBody(text)
       : text.length > 0
         ? (() => {
@@ -115,17 +102,25 @@ async function requestMcp(
   }
 }
 
-function hasJsonRpcError(body: unknown): boolean {
-  if (!body || typeof body !== "object") return false;
-  return "error" in body && Boolean((body as JsonRpcResponse).error);
+function getJsonRpcResult(body: unknown): unknown {
+  if (!body || typeof body !== "object") return undefined;
+  const response = body as JsonRpcResponse;
+  if (response.error || response.result === undefined) return undefined;
+  return response.result;
 }
 
 function getToolsCount(body: unknown): number | undefined {
-  if (!body || typeof body !== "object") return undefined;
-  const result = (body as JsonRpcResponse).result;
+  const result = getJsonRpcResult(body);
   if (!result || typeof result !== "object") return undefined;
   const tools = (result as { readonly tools?: unknown }).tools;
   return Array.isArray(tools) ? tools.length : undefined;
+}
+
+function getInitializedProtocolVersion(body: unknown): string | undefined {
+  const result = getJsonRpcResult(body);
+  if (!result || typeof result !== "object") return undefined;
+  const version = (result as { readonly protocolVersion?: unknown }).protocolVersion;
+  return typeof version === "string" ? version : undefined;
 }
 
 export async function probeMcp(
@@ -134,63 +129,74 @@ export async function probeMcp(
   region: "us" | "eu",
   apiKey?: string,
 ): Promise<McpCapabilityCheck> {
-  const authMode: "api-key" | "oauth" | "none" = apiKey
+  const authenticationMode: "api-key" | "oauth" | "none" = apiKey
     ? "api-key"
     : region === "us"
       ? "oauth"
       : "none";
 
-  const initializeRequest = {
-    jsonrpc: "2.0",
-    id: 1,
-    method: "initialize",
-    params: {
-      protocolVersion: MCP_PROTOCOL_VERSION,
-      capabilities: {},
-      clientInfo: {
-        name: "expose-pstmn",
-        version: "0.1.0",
-      },
-    },
+  const baseResult = {
+    name: `Postman MCP ${configuration}`,
+    endpoint,
+    region,
+    configuration,
+    transport: "streamable-http" as const,
+    authenticationMode,
   };
 
-  const initialize = await requestMcp(endpoint, initializeRequest, apiKey);
+  const initialize = await requestMcp(
+    endpoint,
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: {
+          name: "expose-pstmn",
+          version: "0.1.0",
+        },
+      },
+    },
+    apiKey,
+  );
 
   if (initialize.httpStatus === 401 || initialize.httpStatus === 403) {
     return {
-      name: `Postman MCP ${configuration}`,
+      ...baseResult,
       status: "unauthenticated",
       detail: apiKey
         ? `MCP authentication was rejected (HTTP ${initialize.httpStatus}).`
         : region === "us"
-          ? "US MCP server requires OAuth for this discovery probe; no API key was supplied."
+          ? "US MCP server supports OAuth, but no API key was supplied and this discovery command does not initiate an interactive OAuth flow."
           : "EU MCP server requires a Postman API key.",
-      endpoint,
-      region,
-      configuration,
-      transport: "streamable-http",
       httpStatus: initialize.httpStatus,
       initializeSucceeded: false,
       toolsListSucceeded: false,
       sessionEstablished: false,
-      authenticationMode: authMode,
     };
   }
 
-  if (!initialize.httpStatus || initialize.httpStatus < 200 || initialize.httpStatus >= 300 || hasJsonRpcError(initialize.body)) {
+  const protocolVersion = getInitializedProtocolVersion(initialize.body);
+  const initializeSucceeded = Boolean(
+    initialize.httpStatus &&
+    initialize.httpStatus >= 200 &&
+    initialize.httpStatus < 300 &&
+    protocolVersion === MCP_PROTOCOL_VERSION,
+  );
+
+  if (!initializeSucceeded) {
     return {
-      name: `Postman MCP ${configuration}`,
+      ...baseResult,
       status: "unavailable",
-      detail: initialize.detail,
-      endpoint,
-      region,
-      configuration,
-      transport: "streamable-http",
+      detail: protocolVersion
+        ? `MCP initialize returned protocol version ${protocolVersion}, expected ${MCP_PROTOCOL_VERSION}.`
+        : initialize.detail,
       httpStatus: initialize.httpStatus,
       initializeSucceeded: false,
       toolsListSucceeded: false,
       sessionEstablished: false,
-      authenticationMode: authMode,
     };
   }
 
@@ -207,30 +213,24 @@ export async function probeMcp(
     sessionId,
   );
 
+  const toolCount = getToolsCount(toolsList.body);
   const toolsListSucceeded = Boolean(
     toolsList.httpStatus &&
     toolsList.httpStatus >= 200 &&
     toolsList.httpStatus < 300 &&
-    !hasJsonRpcError(toolsList.body),
+    toolCount !== undefined,
   );
 
   return {
-    name: `Postman MCP ${configuration}`,
+    ...baseResult,
     status: toolsListSucceeded ? "protocol-ready" : "available",
     detail: toolsListSucceeded
-      ? "MCP initialize and tools/list succeeded."
+      ? `MCP initialize and tools/list succeeded; ${toolCount} tool(s) were returned.`
       : "MCP initialize succeeded, but tools/list could not be verified.",
-    endpoint,
-    region,
-    configuration,
-    transport: "streamable-http",
     httpStatus: toolsList.httpStatus ?? initialize.httpStatus,
     initializeSucceeded: true,
     toolsListSucceeded,
-    ...(toolsListSucceeded && getToolsCount(toolsList.body) !== undefined
-      ? { toolCount: getToolsCount(toolsList.body) }
-      : {}),
+    ...(toolCount !== undefined ? { toolCount } : {}),
     sessionEstablished: Boolean(sessionId),
-    authenticationMode: apiKey ? "api-key" : authMode,
   };
 }
