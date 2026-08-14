@@ -6,9 +6,14 @@ export interface HttpProbeResult {
 
 export async function probeEndpoint(
   url: string,
-  options: { readonly timeoutMs?: number; readonly headers?: Record<string, string> } = {},
+  options: {
+    readonly timeoutMs?: number;
+    readonly headers?: Record<string, string>;
+    readonly reachableStatuses?: readonly number[];
+  } = {},
 ): Promise<HttpProbeResult> {
   const timeoutMs = options.timeoutMs ?? 5_000;
+  const reachableStatuses = new Set(options.reachableStatuses ?? [200, 201, 202, 204, 301, 302, 307, 308, 400, 401, 403, 405]);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -27,8 +32,14 @@ export async function probeEndpoint(
       return { status: response.status, ok: false, detail: "Endpoint is reachable but requires authentication." };
     }
 
-    if (response.status >= 200 && response.status < 400) {
-      return { status: response.status, ok: true, detail: "Endpoint is reachable." };
+    if (reachableStatuses.has(response.status)) {
+      return {
+        status: response.status,
+        ok: true,
+        detail: response.status === 405
+          ? "Endpoint is reachable; this endpoint does not accept GET requests."
+          : "Endpoint is reachable.",
+      };
     }
 
     return { status: response.status, ok: false, detail: `Endpoint responded with HTTP ${response.status}.` };
