@@ -60,6 +60,7 @@ export class McpClient {
   private readonly clientVersion: string;
   private sessionId?: string;
   private initialized = false;
+  private nextRequestId = 1;
 
   public constructor(options: McpClientOptions) {
     this.endpoint = options.endpoint;
@@ -110,12 +111,18 @@ export class McpClient {
     }
   }
 
+  private requestId(): number {
+    const id = this.nextRequestId;
+    this.nextRequestId += 1;
+    return id;
+  }
+
   public async initialize(): Promise<McpInitializeResult> {
     if (this.initialized) return { protocolVersion: this.protocolVersion, ...(this.sessionId ? { sessionId: this.sessionId } : {}) };
 
     const result = await this.request({
       jsonrpc: "2.0",
-      id: 1,
+      id: this.requestId(),
       method: "initialize",
       params: {
         protocolVersion: this.protocolVersion,
@@ -135,7 +142,7 @@ export class McpClient {
 
   public async listTools(): Promise<readonly McpTool[]> {
     await this.initialize();
-    const result = await this.request({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, true) as { readonly tools?: unknown };
+    const result = await this.request({ jsonrpc: "2.0", id: this.requestId(), method: "tools/list", params: {} }, true) as { readonly tools?: unknown };
     if (!Array.isArray(result?.tools)) throw new Error("MCP tools/list returned an invalid tools array.");
     return result.tools.flatMap((tool): McpTool[] => {
       if (!tool || typeof tool !== "object") return [];
@@ -154,7 +161,7 @@ export class McpClient {
     await this.initialize();
     const result = await this.request({
       jsonrpc: "2.0",
-      id: 3,
+      id: this.requestId(),
       method: "tools/call",
       params: { name, arguments: args },
     }, true) as { readonly content?: unknown; readonly isError?: unknown };
