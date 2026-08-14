@@ -1,4 +1,4 @@
-export type CheckStatus = "available" | "authenticated" | "unavailable" | "not-found" | "unknown" | "error";
+export type CheckStatus = "available" | "authenticated" | "unauthenticated" | "unavailable" | "not-found" | "unknown" | "error";
 
 export interface ToolCheck {
   readonly name: string;
@@ -22,6 +22,7 @@ export interface DiscoveryReport {
   readonly nodeVersion: string;
   readonly platform: NodeJS.Platform;
   readonly postmanCli: ToolCheck;
+  readonly postmanApi: ToolCheck;
   readonly mcp: readonly ToolCheck[];
   readonly environment: {
     readonly postmanApiKeyConfigured: boolean;
