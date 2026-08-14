@@ -24,6 +24,7 @@ export interface McpToolCallResult {
 }
 
 type JsonRpcMessage = {
+  readonly id?: number | string | null;
   readonly result?: unknown;
   readonly error?: { readonly code?: number; readonly message?: string; readonly data?: unknown };
 };
@@ -36,18 +37,36 @@ function parseBody(text: string, contentType: string): unknown {
       .flatMap((event) => event.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()))
       .filter(Boolean);
     for (const data of events.reverse()) {
-      try { return JSON.parse(data) as unknown; } catch { /* continue */ }
+      try {
+        return JSON.parse(data) as unknown;
+      } catch {
+        // Continue until a valid JSON event is found.
+      }
     }
     return undefined;
   }
-  try { return JSON.parse(text) as unknown; } catch { return undefined; }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
-function asJsonRpc(message: unknown): JsonRpcMessage {
-  if (!message || typeof message !== "object") throw new Error("MCP returned an invalid JSON-RPC response.");
+function asJsonRpc(message: unknown, expectedId: number): JsonRpcMessage {
+  if (!message || typeof message !== "object") {
+    throw new Error("MCP returned an invalid JSON-RPC response.");
+  }
+
   const json = message as JsonRpcMessage;
-  if (json.error) throw new Error(`MCP error ${json.error.code ?? "unknown"}: ${json.error.message ?? "unknown error"}`);
-  if (json.result === undefined) throw new Error("MCP response did not contain a JSON-RPC result.");
+  if (json.error) {
+    throw new Error(`MCP error ${json.error.code ?? "unknown"}: ${json.error.message ?? "unknown error"}`);
+  }
+  if (json.id !== expectedId) {
+    throw new Error(`MCP response id mismatch: expected ${expectedId}, received ${String(json.id)}.`);
+  }
+  if (json.result === undefined) {
+    throw new Error("MCP response did not contain a JSON-RPC result.");
+  }
   return json;
 }
 
@@ -71,7 +90,7 @@ export class McpClient {
     this.clientVersion = options.clientVersion ?? "0.1.0";
   }
 
-  private async request(body: unknown, expectResponse: boolean): Promise<unknown> {
+  private async request(body: { readonly id?: number; readonly method: string; readonly params?: unknown }, expectResponse: boolean): Promise<unknown> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -86,7 +105,7 @@ export class McpClient {
       const response = await fetch(this.endpoint, {
         method: "POST",
         headers,
-        body: JSON.stringify(body),
+        body: JSON.stringify({ jsonrpc: "2.0", ...body }),
         signal: controller.signal,
       });
 
@@ -100,7 +119,10 @@ export class McpClient {
       if (!expectResponse) return undefined;
 
       const parsed = parseBody(await response.text(), response.headers.get("content-type") ?? "");
-      return asJsonRpc(parsed).result;
+      if (body.id === undefined) {
+        throw new Error("MCP response was expected for a notification request.");
+      }
+      return asJsonRpc(parsed, body.id).result;
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         throw new Error(`MCP request timed out after ${this.timeoutMs}ms.`);
@@ -118,11 +140,13 @@ export class McpClient {
   }
 
   public async initialize(): Promise<McpInitializeResult> {
-    if (this.initialized) return { protocolVersion: this.protocolVersion, ...(this.sessionId ? { sessionId: this.sessionId } : {}) };
+    if (this.initialized) {
+      return { protocolVersion: this.protocolVersion, ...(this.sessionId ? { sessionId: this.sessionId } : {}) };
+    }
 
+    const id = this.requestId();
     const result = await this.request({
-      jsonrpc: "2.0",
-      id: this.requestId(),
+      id,
       method: "initialize",
       params: {
         protocolVersion: this.protocolVersion,
@@ -131,19 +155,25 @@ export class McpClient {
       },
     }, true) as { readonly protocolVersion?: unknown };
 
-    if (typeof result?.protocolVersion !== "string") throw new Error("MCP initialize did not return a protocolVersion.");
+    if (typeof result?.protocolVersion !== "string") {
+      throw new Error("MCP initialize did not return a protocolVersion.");
+    }
     const negotiated = result.protocolVersion;
-    if (negotiated !== this.protocolVersion) throw new Error(`Unsupported negotiated MCP protocol version: ${negotiated}.`);
+    if (negotiated !== this.protocolVersion) {
+      throw new Error(`Unsupported negotiated MCP protocol version: ${negotiated}.`);
+    }
 
-    await this.request({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }, false);
+    await this.request({ method: "notifications/initialized", params: {} }, false);
     this.initialized = true;
     return { protocolVersion: negotiated, ...(this.sessionId ? { sessionId: this.sessionId } : {}) };
   }
 
   public async listTools(): Promise<readonly McpTool[]> {
     await this.initialize();
-    const result = await this.request({ jsonrpc: "2.0", id: this.requestId(), method: "tools/list", params: {} }, true) as { readonly tools?: unknown };
-    if (!Array.isArray(result?.tools)) throw new Error("MCP tools/list returned an invalid tools array.");
+    const result = await this.request({ id: this.requestId(), method: "tools/list", params: {} }, true) as { readonly tools?: unknown };
+    if (!Array.isArray(result?.tools)) {
+      throw new Error("MCP tools/list returned an invalid tools array.");
+    }
     return result.tools.flatMap((tool): McpTool[] => {
       if (!tool || typeof tool !== "object") return [];
       const candidate = tool as { readonly name?: unknown; readonly description?: unknown; readonly inputSchema?: unknown };
@@ -160,12 +190,13 @@ export class McpClient {
     if (!name) throw new Error("MCP tool name is required.");
     await this.initialize();
     const result = await this.request({
-      jsonrpc: "2.0",
       id: this.requestId(),
       method: "tools/call",
       params: { name, arguments: args },
     }, true) as { readonly content?: unknown; readonly isError?: unknown };
-    if (!Array.isArray(result?.content)) throw new Error("MCP tools/call returned an invalid content array.");
+    if (!Array.isArray(result?.content)) {
+      throw new Error("MCP tools/call returned an invalid content array.");
+    }
     return {
       content: result.content,
       isError: result.isError === true,
