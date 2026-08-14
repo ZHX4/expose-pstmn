@@ -25,12 +25,13 @@ describe("CLI", () => {
     expect(output).toEqual(["0.1.0"]);
   });
 
-  it("prints help for --help", async () => {
+  it("prints help for --help and includes phase 2 doctor", async () => {
     const output: string[] = [];
     const code = await runCli(["--help"], context, (text) => output.push(text));
 
     expect(code).toBe(0);
-    expect(output[0]).toContain("Usage:");
+    expect(output[0]).toContain("doctor");
+    expect(output[0]).toContain("--json");
   });
 
   it("rejects unknown commands", async () => {
