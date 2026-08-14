@@ -14,6 +14,12 @@ const report: DiscoveryReport = {
     detail: "Postman CLI executable is available.",
     version: "1.2.3",
   },
+  postmanApi: {
+    name: "Postman API",
+    status: "authenticated",
+    detail: "Postman API accepted the configured API key at GET /me.",
+    endpoint: "https://api.getpostman.com/me",
+  },
   mcp: [
     {
       name: "Postman MCP minimal",
@@ -25,12 +31,12 @@ const report: DiscoveryReport = {
   ],
   environment: {
     postmanApiKeyConfigured: true,
-    postmanApiBaseUrl: "https://api.postman.com",
+    postmanApiBaseUrl: "https://api.getpostman.com",
     postmanRegion: "us",
   },
   models: [
     {
-      id: "gpt-5.6-sol",
+      id: "GPT-5.6 Sol",
       source: "agent-mode",
       externallyCallable: "unknown",
       evidence: "Account UI evidence only.",
@@ -43,7 +49,8 @@ describe("discovery formatting", () => {
   it("formats a human-readable report", () => {
     const text = formatDiscoveryReport(report);
     expect(text).toContain("Postman CLI");
-    expect(text).toContain("gpt-5.6-sol");
+    expect(text).toContain("Postman API");
+    expect(text).toContain("GPT-5.6 Sol");
     expect(text).toContain("externallyCallable=unknown");
   });
 
