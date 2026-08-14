@@ -1,4 +1,12 @@
-export type CheckStatus = "available" | "authenticated" | "unauthenticated" | "unavailable" | "not-found" | "unknown" | "error";
+export type CheckStatus =
+  | "available"
+  | "authenticated"
+  | "unauthenticated"
+  | "protocol-ready"
+  | "unavailable"
+  | "not-found"
+  | "unknown"
+  | "error";
 
 export interface ToolCheck {
   readonly name: string;
@@ -7,6 +15,17 @@ export interface ToolCheck {
   readonly version?: string;
   readonly endpoint?: string;
   readonly region?: "us" | "eu";
+}
+
+export interface McpCapabilityCheck extends ToolCheck {
+  readonly configuration: "minimal" | "code" | "full";
+  readonly transport: "streamable-http";
+  readonly httpStatus: number | null;
+  readonly initializeSucceeded: boolean;
+  readonly toolsListSucceeded: boolean;
+  readonly toolCount?: number;
+  readonly sessionEstablished: boolean;
+  readonly authenticationMode: "api-key" | "oauth" | "none" | "unknown";
 }
 
 export interface ModelCapability {
@@ -23,7 +42,7 @@ export interface DiscoveryReport {
   readonly platform: NodeJS.Platform;
   readonly postmanCli: ToolCheck;
   readonly postmanApi: ToolCheck;
-  readonly mcp: readonly ToolCheck[];
+  readonly mcp: readonly McpCapabilityCheck[];
   readonly environment: {
     readonly postmanApiKeyConfigured: boolean;
     readonly postmanApiBaseUrl?: string;
