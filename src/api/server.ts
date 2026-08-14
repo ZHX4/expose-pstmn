@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Provider } from "../providers/types.js";
 import { authorizeRequest } from "./auth.js";
-import { createConcurrencyGate, createRateLimiter } from "./limits.js";
+import { ConcurrencyLimitError, createConcurrencyGate, createRateLimiter } from "./limits.js";
 import type { ChatCompletionRequest, GatewayConfig, OpenAIErrorBody, OpenAIModelsResponse, ServerHandle } from "./types.js";
 
 const JSON_HEADERS = {
@@ -156,11 +156,7 @@ export async function startGatewayServer(config: GatewayConfig, provider: Provid
       if (method === "POST" && path === "/v1/chat/completions") {
         const body = validateChatRequest(await readJsonBody(request, config.maxBodyBytes));
         if (!provider.capabilities.modelCompletion) {
-          writeJson(response, 501, errorBody(
-            "The configured provider does not expose a verified model-completion interface.",
-            "not_implemented",
-            "model_completion_unavailable",
-          ));
+          writeJson(response, 501, errorBody("The configured provider does not expose a verified model-completion interface.", "not_implemented", "model_completion_unavailable"));
           return;
         }
         if (body.stream) {
@@ -179,7 +175,9 @@ export async function startGatewayServer(config: GatewayConfig, provider: Provid
         response.end();
         return;
       }
-      if (error instanceof BodyTooLargeError) {
+      if (error instanceof ConcurrencyLimitError) {
+        writeJson(response, 503, errorBody(error.message, "server_error", "concurrency_limit"), { "Retry-After": "1" });
+      } else if (error instanceof BodyTooLargeError) {
         writeJson(response, 413, errorBody(error.message, "invalid_request_error", "body_too_large"));
       } else if (error instanceof InvalidRequestError) {
         writeJson(response, 400, errorBody(error.message, "invalid_request_error", "invalid_request"));
@@ -212,6 +210,8 @@ export async function startGatewayServer(config: GatewayConfig, provider: Provid
   return {
     host: config.host,
     port,
-    close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+    close: () => new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    }),
   };
 }
