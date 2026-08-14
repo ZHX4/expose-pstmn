@@ -1,4 +1,5 @@
 import { runDoctor } from "./doctor.js";
+import { runProvider } from "./provider.js";
 
 export interface CliContext {
   readonly version: string;
@@ -16,12 +17,17 @@ export function getHelpText(): string {
     "  help       Show this help message",
     "  version    Print the installed version",
     "  doctor     Discover local Postman capabilities",
+    "  provider   Inspect and use the configured Postman provider",
     "",
     "Doctor options:",
     "  --json     Emit machine-readable JSON instead of human-readable output",
     "",
-    "Phase 2 status:",
-    "  Capability discovery is implemented. External model callability is reported only when verified.",
+    "Provider commands:",
+    "  status     Initialize the configured provider and report readiness",
+    "  tools      List tools exposed by the configured provider",
+    "",
+    "Phase 3 status:",
+    "  Postman MCP provider integration is implemented; model completion remains disabled until externally verified.",
   ].join("\n");
 }
 
@@ -49,6 +55,9 @@ export async function runCli(
 
     case "doctor":
       return runDoctor(commandArgs, output);
+
+    case "provider":
+      return runProvider(commandArgs, output, error);
 
     default:
       error(`Unknown command: ${command}`);
