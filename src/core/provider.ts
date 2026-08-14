@@ -6,12 +6,13 @@ export async function runProvider(
   error: (text: string) => void = console.error,
 ): Promise<number> {
   const [subcommand] = args;
-  const provider = createProviderFromEnvironment();
 
   try {
+    const provider = createProviderFromEnvironment();
+
     switch (subcommand) {
       case undefined:
-      case "status": { 
+      case "status": {
         const health = await provider.health();
         output(`Provider: ${health.provider}`);
         output(`Ready: ${health.ready ? "yes" : "no"}`);
