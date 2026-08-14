@@ -22,7 +22,23 @@ export function formatDiscoveryReport(report: DiscoveryReport): string {
     formatCheck(report.postmanApi),
     "",
     "Postman MCP endpoints:",
-    ...report.mcp.map(formatCheck),
+    ...report.mcp.map((check) => {
+      const details = [
+        formatCheck(check),
+        `    transport=${check.transport}`,
+        `    configuration=${check.configuration}`,
+        `    HTTP status=${check.httpStatus ?? "none"}`,
+        `    initialize=${check.initializeSucceeded ? "ok" : "failed"}`,
+        `    tools/list=${check.toolsListSucceeded ? "ok" : "failed"}`,
+        `    session=${check.sessionEstablished ? "established" : "not established"}`,
+        `    authentication=${check.authenticationMode}`,
+      ];
+      if (check.toolCount !== undefined) details.push(`    tool count=${check.toolCount}`);
+      return details.join("\n");
+    }),
+    "",
+    "Learn configuration:",
+    formatCheck(report.learnConfiguration),
     "",
     "Environment:",
     `  POSTMAN_API_KEY: ${report.environment.postmanApiKeyConfigured ? "configured" : "not configured"}`,
