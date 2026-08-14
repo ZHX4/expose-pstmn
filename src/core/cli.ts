@@ -1,3 +1,5 @@
+import { runDoctor } from "./doctor.js";
+
 export interface CliContext {
   readonly version: string;
   readonly help: string;
@@ -8,14 +10,18 @@ export function getHelpText(): string {
     "expose-pstmn — Postman AI integration gateway",
     "",
     "Usage:",
-    "  expose-pstmn [command]",
+    "  expose-pstmn [command] [options]",
     "",
     "Commands:",
     "  help       Show this help message",
     "  version    Print the installed version",
+    "  doctor     Discover local Postman capabilities",
     "",
-    "Phase 1 status:",
-    "  Repository foundation initialized. Provider and gateway integrations are not active yet.",
+    "Doctor options:",
+    "  --json     Emit machine-readable JSON instead of human-readable output",
+    "",
+    "Phase 2 status:",
+    "  Capability discovery is implemented. External model callability is reported only when verified.",
   ].join("\n");
 }
 
@@ -25,7 +31,7 @@ export async function runCli(
   output: (text: string) => void = console.log,
   error: (text: string) => void = console.error,
 ): Promise<number> {
-  const [command] = args;
+  const [command, ...commandArgs] = args;
 
   switch (command) {
     case undefined:
@@ -40,6 +46,9 @@ export async function runCli(
     case "-v":
       output(context.version);
       return 0;
+
+    case "doctor":
+      return runDoctor(commandArgs, output);
 
     default:
       error(`Unknown command: ${command}`);
