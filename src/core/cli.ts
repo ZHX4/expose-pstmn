@@ -1,4 +1,5 @@
 import { runDoctor } from "./doctor.js";
+import { runGateway } from "./gateway.js";
 import { runProvider } from "./provider.js";
 
 export interface CliContext {
@@ -18,6 +19,7 @@ export function getHelpText(): string {
     "  version    Print the installed version",
     "  doctor     Discover local Postman capabilities",
     "  provider   Inspect and use the configured Postman provider",
+    "  gateway    Start the local HTTP gateway",
     "",
     "Doctor options:",
     "  --json     Emit machine-readable JSON instead of human-readable output",
@@ -26,8 +28,11 @@ export function getHelpText(): string {
     "  status     Initialize the configured provider and report readiness",
     "  tools      List tools exposed by the configured provider",
     "",
-    "Phase 3 status:",
-    "  Postman MCP provider integration is implemented; model completion remains disabled until externally verified.",
+    "Gateway commands:",
+    "  start      Start the localhost-only HTTP gateway",
+    "",
+    "Phase 4 status:",
+    "  Local gateway is implemented; model completion remains disabled until a provider exposes a verified model interface.",
   ].join("\n");
 }
 
@@ -58,6 +63,9 @@ export async function runCli(
 
     case "provider":
       return runProvider(commandArgs, output, error);
+
+    case "gateway":
+      return runGateway(commandArgs, output, error);
 
     default:
       error(`Unknown command: ${command}`);
