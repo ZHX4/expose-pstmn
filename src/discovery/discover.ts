@@ -1,26 +1,27 @@
 import { runCommand } from "./command.js";
 import { probeEndpoint } from "./http.js";
+import { probeMcp } from "./mcp.js";
 import type { DiscoveryReport, ModelCapability, ToolCheck } from "./types.js";
 
 const MCP_ENDPOINTS = [
-  { region: "us" as const, name: "Postman MCP minimal", endpoint: "https://mcp.postman.com/minimal" },
-  { region: "us" as const, name: "Postman MCP code", endpoint: "https://mcp.postman.com/code" },
-  { region: "us" as const, name: "Postman MCP full", endpoint: "https://mcp.postman.com/mcp" },
-  { region: "eu" as const, name: "Postman EU MCP minimal", endpoint: "https://mcp.eu.postman.com/minimal" },
-  { region: "eu" as const, name: "Postman EU MCP code", endpoint: "https://mcp.eu.postman.com/code" },
-  { region: "eu" as const, name: "Postman EU MCP full", endpoint: "https://mcp.eu.postman.com/mcp" },
+  { region: "us" as const, name: "Postman MCP minimal", configuration: "minimal" as const, endpoint: "https://mcp.postman.com/minimal" },
+  { region: "us" as const, name: "Postman MCP code", configuration: "code" as const, endpoint: "https://mcp.postman.com/code" },
+  { region: "us" as const, name: "Postman MCP full", configuration: "full" as const, endpoint: "https://mcp.postman.com/mcp" },
+  { region: "eu" as const, name: "Postman EU MCP minimal", configuration: "minimal" as const, endpoint: "https://mcp.eu.postman.com/minimal" },
+  { region: "eu" as const, name: "Postman EU MCP code", configuration: "code" as const, endpoint: "https://mcp.eu.postman.com/code" },
+  { region: "eu" as const, name: "Postman EU MCP full", configuration: "full" as const, endpoint: "https://mcp.eu.postman.com/mcp" },
 ];
 
 function inferRegion(apiBaseUrl: string | undefined): "us" | "eu" | "unknown" {
   if (!apiBaseUrl) return "unknown";
   if (apiBaseUrl.includes("api.eu.postman.com")) return "eu";
-  if (apiBaseUrl.includes("api.getpostman.com") || apiBaseUrl.includes("api.postman.com")) return "us";
+  if (apiBaseUrl.includes("api.postman.com")) return "us";
   return "unknown";
 }
 
 function normalizeApiBaseUrl(value: string | undefined, region: "us" | "eu" | "unknown"): string {
   if (value) return value.replace(/\/$/, "");
-  return region === "eu" ? "https://api.eu.postman.com" : "https://api.getpostman.com";
+  return region === "eu" ? "https://api.eu.postman.com" : "https://api.postman.com";
 }
 
 function parseVersion(stdout: string): string | undefined {
@@ -37,13 +38,32 @@ function sanitizeBaseUrl(value: string): string {
   }
 }
 
+function isOfficialPostmanApiHost(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" &&
+      (parsed.hostname === "api.postman.com" || parsed.hostname === "api.eu.postman.com");
+  } catch {
+    return false;
+  }
+}
+
 async function checkPostmanApi(apiKey: string | undefined, apiBaseUrl: string): Promise<ToolCheck> {
   const endpoint = `${apiBaseUrl}/me`;
+  if (!isOfficialPostmanApiHost(apiBaseUrl)) {
+    return {
+      name: "Postman API",
+      status: "error",
+      detail: "POSTMAN_API_BASE_URL must use the official Postman API hostname (api.postman.com or api.eu.postman.com).",
+      endpoint: sanitizeBaseUrl(apiBaseUrl),
+    };
+  }
+
   if (!apiKey) {
     return {
       name: "Postman API",
       status: "unauthenticated",
-      detail: "No POSTMAN_API_KEY is configured; authentication was not attempted.",
+      detail: "No POSTMAN_API_KEY is configured; GET /me authentication was not attempted.",
       endpoint,
     };
   }
@@ -65,7 +85,7 @@ async function checkPostmanApi(apiKey: string | undefined, apiBaseUrl: string): 
     return {
       name: "Postman API",
       status: "unauthenticated",
-      detail: "Postman API rejected the configured API key.",
+      detail: "Postman API rejected the configured API key at GET /me.",
       endpoint,
     };
   }
@@ -106,53 +126,40 @@ export async function discover(): Promise<DiscoveryReport> {
         };
 
   const postmanApi = await checkPostmanApi(apiKey, apiBaseUrl);
-
-  const mcp: ToolCheck[] = [];
-  for (const candidate of MCP_ENDPOINTS) {
-    const result = await probeEndpoint(candidate.endpoint);
-    mcp.push({
-      name: candidate.name,
-      status: result.status === 401 || result.status === 403
-        ? "authenticated"
-        : result.ok
-          ? "available"
-          : result.status === null
-            ? "error"
-            : "unavailable",
-      detail: result.detail,
-      endpoint: candidate.endpoint,
-      region: candidate.region,
-    });
-  }
+  const mcp = await Promise.all(
+    MCP_ENDPOINTS.map((candidate) => probeMcp(candidate.endpoint, candidate.configuration, candidate.region, apiKey)),
+  );
 
   const models: ModelCapability[] = [
     {
       id: "GPT-5.6 Sol",
       source: "agent-mode",
       externallyCallable: "unknown",
-      evidence: "Observed by the user in the Postman Agent Mode model selector; this does not prove external callability.",
+      evidence: "Observed by the user in the Postman Agent Mode model selector. Postman documentation establishes Agent Mode model selection, but the UI observation alone does not establish an external model endpoint.",
     },
     {
       id: "Claude Opus 4.8",
       source: "agent-mode",
       externallyCallable: "unknown",
-      evidence: "Observed by the user in the Postman Agent Mode model selector; this does not prove external callability.",
+      evidence: "Observed by the user in the Postman Agent Mode model selector. Postman documentation establishes Agent Mode model selection, but the UI observation alone does not establish an external model endpoint.",
     },
   ];
 
+  const protocolReadyCount = mcp.filter((entry) => entry.status === "protocol-ready").length;
   const conclusions = [
     postmanCli.status === "available"
       ? "Postman CLI is available locally."
-      : "Postman CLI is not verified locally; install it or expose it on PATH before CLI-based cloud checks.",
+      : "Postman CLI is not verified locally; install it or expose it on PATH before CLI-based checks.",
     postmanApi.status === "authenticated"
       ? "The configured Postman API key is valid for GET /me."
       : postmanApi.status === "unauthenticated"
         ? "Postman API authentication is not currently available."
-        : "Postman API reachability could not be verified.",
-    mcp.some((entry) => entry.status === "available" || entry.status === "authenticated")
-      ? "At least one documented Postman MCP endpoint is reachable."
-      : "No documented Postman MCP endpoint was confirmed reachable from this machine.",
-    "Agent Mode model visibility is recorded as account evidence only; external model access remains unverified until a supported provider path succeeds.",
+        : "Postman API reachability or configuration could not be verified.",
+    protocolReadyCount > 0
+      ? `${protocolReadyCount} Postman MCP endpoint(s) completed an MCP initialize + tools/list handshake.`
+      : "No Postman MCP endpoint completed an authenticated MCP initialize + tools/list handshake.",
+    "The US remote MCP server supports OAuth; this CLI does not initiate an interactive OAuth browser flow during discovery. If no API key is supplied, US MCP authentication remains an explicit unknown/unauthenticated state.",
+    "Agent Mode model visibility is recorded as account evidence only. External model callability is not claimed unless a supported API/MCP/Flows path actually verifies it.",
   ];
 
   return {
