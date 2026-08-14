@@ -3,6 +3,13 @@ export interface RateLimiter {
   readonly remaining: () => number;
 }
 
+export class ConcurrencyLimitError extends Error {
+  public constructor() {
+    super("Gateway concurrency queue is full.");
+    this.name = "ConcurrencyLimitError";
+  }
+}
+
 export function createRateLimiter(limitPerMinute: number, now: () => number = () => Date.now()): RateLimiter {
   let windowStart = now();
   let count = 0;
@@ -29,7 +36,7 @@ export function createRateLimiter(limitPerMinute: number, now: () => number = ()
   };
 }
 
-export function createConcurrencyGate(maxConcurrent: number): { run<T>(task: () => Promise<T>): Promise<T> } {
+export function createConcurrencyGate(maxConcurrent: number, maxQueued = maxConcurrent * 4): { run<T>(task: () => Promise<T>): Promise<T> } {
   let active = 0;
   const queue: Array<{
     readonly task: () => Promise<unknown>;
@@ -50,6 +57,7 @@ export function createConcurrencyGate(maxConcurrent: number): { run<T>(task: () 
 
   return {
     run<T>(task: () => Promise<T>): Promise<T> {
+      if (queue.length >= maxQueued) return Promise.reject(new ConcurrencyLimitError());
       return new Promise<T>((resolve, reject) => {
         queue.push({
           task: task as () => Promise<unknown>,
