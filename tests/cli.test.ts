@@ -10,6 +10,7 @@ const context = {
 const originalPostmanApiKey = process.env.POSTMAN_API_KEY;
 const originalPostmanRegion = process.env.POSTMAN_REGION;
 const originalPostmanMcpEndpoint = process.env.POSTMAN_MCP_ENDPOINT;
+const originalGatewayApiKey = process.env.EXPOSE_PSTMN_API_KEY;
 
 afterEach(() => {
   if (originalPostmanApiKey === undefined) delete process.env.POSTMAN_API_KEY;
@@ -18,6 +19,8 @@ afterEach(() => {
   else process.env.POSTMAN_REGION = originalPostmanRegion;
   if (originalPostmanMcpEndpoint === undefined) delete process.env.POSTMAN_MCP_ENDPOINT;
   else process.env.POSTMAN_MCP_ENDPOINT = originalPostmanMcpEndpoint;
+  if (originalGatewayApiKey === undefined) delete process.env.EXPOSE_PSTMN_API_KEY;
+  else process.env.EXPOSE_PSTMN_API_KEY = originalGatewayApiKey;
   vi.restoreAllMocks();
 });
 
@@ -39,14 +42,15 @@ describe("CLI", () => {
     expect(output).toEqual(["0.1.0"]);
   });
 
-  it("advertises the phase 3 provider command and subcommands", async () => {
+  it("advertises doctor, provider, and gateway commands", async () => {
     const output: string[] = [];
     const code = await runCli(["--help"], context, (text) => output.push(text));
 
     expect(code).toBe(0);
+    expect(output[0]).toContain("doctor");
     expect(output[0]).toContain("provider");
-    expect(output[0]).toContain("status");
-    expect(output[0]).toContain("tools");
+    expect(output[0]).toContain("gateway");
+    expect(output[0]).toContain("/v1");
   });
 
   it("routes provider commands through the provider layer", async () => {
@@ -61,6 +65,16 @@ describe("CLI", () => {
     expect(errors).toEqual([
       "US Postman MCP requires authentication. Set POSTMAN_API_KEY for non-interactive provider access.",
     ]);
+  });
+
+  it("returns a gateway configuration error without a local key", async () => {
+    delete process.env.EXPOSE_PSTMN_API_KEY;
+    const errors: string[] = [];
+
+    const code = await runCli(["gateway", "start"], () => undefined, (text) => errors.push(text));
+
+    expect(code).toBe(2);
+    expect(errors[0]).toContain("EXPOSE_PSTMN_API_KEY");
   });
 
   it("rejects unknown commands", async () => {
