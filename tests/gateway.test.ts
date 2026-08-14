@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { authorizeRequest, getBearerToken } from "../src/api/auth.js";
 import { loadGatewayConfig } from "../src/api/config.js";
-import { createConcurrencyGate, createRateLimiter } from "../src/api/limits.js";
+import { ConcurrencyLimitError, createConcurrencyGate, createRateLimiter } from "../src/api/limits.js";
 import { startGatewayServer } from "../src/api/server.js";
 import type { GatewayConfig } from "../src/api/types.js";
 import type { Provider } from "../src/providers/types.js";
@@ -80,14 +80,15 @@ describe("gateway limits", () => {
     expect(limiter.allow()).toBe(true);
   });
 
-  it("enforces maximum concurrency", async () => {
-    const gate = createConcurrencyGate(1);
+  it("enforces maximum concurrency and a bounded queue", async () => {
+    const gate = createConcurrencyGate(1, 1);
     let release!: () => void;
     const first = gate.run(() => new Promise<void>((resolve) => { release = resolve; }));
     let secondStarted = false;
     const second = gate.run(async () => { secondStarted = true; });
     await Promise.resolve();
     expect(secondStarted).toBe(false);
+    await expect(gate.run(async () => undefined)).rejects.toBeInstanceOf(ConcurrencyLimitError);
     release();
     await first;
     await second;
@@ -110,6 +111,10 @@ describe("HTTP gateway", () => {
     const models = await fetch(`${base}/v1/models`, { headers: { Authorization: "Bearer gateway-secret" } });
     expect(models.status).toBe(200);
     await expect(models.json()).resolves.toEqual({ object: "list", data: [] });
+
+    const providerResponse = await fetch(`${base}/v1/provider`, { headers: { Authorization: "Bearer gateway-secret" } });
+    expect(providerResponse.status).toBe(200);
+    expect((await providerResponse.json()).capabilities.modelCompletion).toBe(false);
 
     const tools = await fetch(`${base}/v1/postman/tools`, { headers: { Authorization: "Bearer gateway-secret" } });
     expect(tools.status).toBe(200);
