@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { formatDiscoveryJson, formatDiscoveryReport } from "../src/discovery/format.js";
 import { probeMcp } from "../src/discovery/mcp.js";
@@ -32,7 +32,7 @@ const report: DiscoveryReport = {
     {
       name: "Postman MCP minimal",
       status: "protocol-ready",
-      detail: "MCP initialize and tools/list succeeded.",
+      detail: "MCP initialize, notifications/initialized, and tools/list succeeded; 2 tool(s) were returned.",
       endpoint: "https://mcp.postman.com/minimal",
       region: "us",
       configuration: "minimal",
@@ -40,7 +40,7 @@ const report: DiscoveryReport = {
       httpStatus: 200,
       initializeSucceeded: true,
       toolsListSucceeded: true,
-      toolCount: 3,
+      toolCount: 2,
       sessionEstablished: true,
       authenticationMode: "api-key",
     },
@@ -74,7 +74,7 @@ describe("discovery formatting", () => {
     expect(text).toContain("Postman MCP minimal");
     expect(text).toContain("initialize=ok");
     expect(text).toContain("tools/list=ok");
-    expect(text).toContain("tool count=3");
+    expect(text).toContain("tool count=2");
     expect(text).toContain("Learn configuration");
     expect(text).toContain("GPT-5.6 Sol");
     expect(text).toContain("externallyCallable=unknown");
@@ -84,13 +84,14 @@ describe("discovery formatting", () => {
     const text = formatDiscoveryJson(report);
     const parsed = JSON.parse(text) as DiscoveryReport;
     expect(parsed.environment.postmanApiKeyConfigured).toBe(true);
+    expect(parsed.learnConfiguration.status).toBe("unknown");
     expect(text).not.toContain("POSTMAN_API_KEY=");
     expect(text).not.toContain("secret-value");
   });
 });
 
 describe("MCP discovery", () => {
-  it("completes initialize and tools/list and captures the session", async () => {
+  it("completes initialize, initialization notification, and tools/list", async () => {
     let calls = 0;
     globalThis.fetch = vi.fn(async (_input, init) => {
       calls += 1;
@@ -116,7 +117,16 @@ describe("MCP discovery", () => {
         });
       }
 
+      if (calls === 2) {
+        expect(headers.get("Mcp-Session-Id")).toBe("session-123");
+        const body = JSON.parse(String(init?.body)) as { method?: string };
+        expect(body.method).toBe("notifications/initialized");
+        return new Response(null, { status: 202 });
+      }
+
       expect(headers.get("Mcp-Session-Id")).toBe("session-123");
+      const body = JSON.parse(String(init?.body)) as { method?: string };
+      expect(body.method).toBe("tools/list");
       return new Response(JSON.stringify({
         jsonrpc: "2.0",
         id: 2,
