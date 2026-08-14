@@ -183,7 +183,7 @@ export async function probeMcp(
     initialize.httpStatus &&
     initialize.httpStatus >= 200 &&
     initialize.httpStatus < 300 &&
-    protocolVersion === MCP_PROTOCOL_VERSION,
+    protocolVersion,
   );
 
   if (!initializeSucceeded) {
@@ -191,7 +191,7 @@ export async function probeMcp(
       ...baseResult,
       status: "unavailable",
       detail: protocolVersion
-        ? `MCP initialize returned protocol version ${protocolVersion}, expected ${MCP_PROTOCOL_VERSION}.`
+        ? `MCP initialize negotiated protocol version ${protocolVersion}.`
         : initialize.detail,
       httpStatus: initialize.httpStatus,
       initializeSucceeded: false,
@@ -201,6 +201,34 @@ export async function probeMcp(
   }
 
   const sessionId = initialize.headers?.get("Mcp-Session-Id") ?? undefined;
+
+  const initializedNotification = await requestMcp(
+    endpoint,
+    {
+      jsonrpc: "2.0",
+      method: "notifications/initialized",
+      params: {},
+    },
+    apiKey,
+    sessionId,
+  );
+
+  const notificationSucceeded = initializedNotification.httpStatus === 202 ||
+    initializedNotification.httpStatus === 200 ||
+    initializedNotification.httpStatus === 204;
+
+  if (!notificationSucceeded) {
+    return {
+      ...baseResult,
+      status: "available",
+      detail: "MCP initialize succeeded, but notifications/initialized was not accepted.",
+      httpStatus: initializedNotification.httpStatus ?? initialize.httpStatus,
+      initializeSucceeded: true,
+      toolsListSucceeded: false,
+      sessionEstablished: Boolean(sessionId),
+    };
+  }
+
   const toolsList = await requestMcp(
     endpoint,
     {
@@ -225,8 +253,8 @@ export async function probeMcp(
     ...baseResult,
     status: toolsListSucceeded ? "protocol-ready" : "available",
     detail: toolsListSucceeded
-      ? `MCP initialize and tools/list succeeded; ${toolCount} tool(s) were returned.`
-      : "MCP initialize succeeded, but tools/list could not be verified.",
+      ? `MCP initialize, notifications/initialized, and tools/list succeeded; ${toolCount} tool(s) were returned.`
+      : "MCP initialize and initialization notification succeeded, but tools/list could not be verified.",
     httpStatus: toolsList.httpStatus ?? initialize.httpStatus,
     initializeSucceeded: true,
     toolsListSucceeded,
