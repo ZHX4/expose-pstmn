@@ -43,6 +43,7 @@ export interface DiscoveryReport {
   readonly postmanCli: ToolCheck;
   readonly postmanApi: ToolCheck;
   readonly mcp: readonly McpCapabilityCheck[];
+  readonly learnConfiguration: ToolCheck;
   readonly environment: {
     readonly postmanApiKeyConfigured: boolean;
     readonly postmanApiBaseUrl?: string;
