@@ -4,12 +4,12 @@ import { probeMcp } from "./mcp.js";
 import type { DiscoveryReport, ModelCapability, ToolCheck } from "./types.js";
 
 const MCP_ENDPOINTS = [
-  { region: "us" as const, name: "Postman MCP minimal", configuration: "minimal" as const, endpoint: "https://mcp.postman.com/minimal" },
-  { region: "us" as const, name: "Postman MCP code", configuration: "code" as const, endpoint: "https://mcp.postman.com/code" },
-  { region: "us" as const, name: "Postman MCP full", configuration: "full" as const, endpoint: "https://mcp.postman.com/mcp" },
-  { region: "eu" as const, name: "Postman EU MCP minimal", configuration: "minimal" as const, endpoint: "https://mcp.eu.postman.com/minimal" },
-  { region: "eu" as const, name: "Postman EU MCP code", configuration: "code" as const, endpoint: "https://mcp.eu.postman.com/code" },
-  { region: "eu" as const, name: "Postman EU MCP full", configuration: "full" as const, endpoint: "https://mcp.eu.postman.com/mcp" },
+  { region: "us" as const, configuration: "minimal" as const, endpoint: "https://mcp.postman.com/minimal" },
+  { region: "us" as const, configuration: "code" as const, endpoint: "https://mcp.postman.com/code" },
+  { region: "us" as const, configuration: "full" as const, endpoint: "https://mcp.postman.com/mcp" },
+  { region: "eu" as const, configuration: "minimal" as const, endpoint: "https://mcp.eu.postman.com/minimal" },
+  { region: "eu" as const, configuration: "code" as const, endpoint: "https://mcp.eu.postman.com/code" },
+  { region: "eu" as const, configuration: "full" as const, endpoint: "https://mcp.eu.postman.com/mcp" },
 ];
 
 function inferRegion(apiBaseUrl: string | undefined): "us" | "eu" | "unknown" {
@@ -98,6 +98,14 @@ async function checkPostmanApi(apiKey: string | undefined, apiBaseUrl: string): 
   };
 }
 
+function getLearnConfigurationCheck(): ToolCheck {
+  return {
+    name: "Postman MCP Learn configuration",
+    status: "unknown",
+    detail: "Postman documents Learn as an MCP configuration, but the current remote Streamable HTTP endpoint table does not publish a distinct Learn URL. No undocumented endpoint is synthesized or probed.",
+  };
+}
+
 export async function discover(): Promise<DiscoveryReport> {
   const apiKey = process.env.POSTMAN_API_KEY;
   const configuredApiBaseUrl = process.env.POSTMAN_API_BASE_URL;
@@ -129,19 +137,20 @@ export async function discover(): Promise<DiscoveryReport> {
   const mcp = await Promise.all(
     MCP_ENDPOINTS.map((candidate) => probeMcp(candidate.endpoint, candidate.configuration, candidate.region, apiKey)),
   );
+  const learnConfiguration = getLearnConfigurationCheck();
 
   const models: ModelCapability[] = [
     {
       id: "GPT-5.6 Sol",
       source: "agent-mode",
       externallyCallable: "unknown",
-      evidence: "Observed by the user in the Postman Agent Mode model selector. Postman documentation establishes Agent Mode model selection, but the UI observation alone does not establish an external model endpoint.",
+      evidence: "Observed by the user in the Postman Agent Mode model selector. Postman documents Agent Mode model selection, but the UI observation alone does not establish an external model endpoint.",
     },
     {
       id: "Claude Opus 4.8",
       source: "agent-mode",
       externallyCallable: "unknown",
-      evidence: "Observed by the user in the Postman Agent Mode model selector. Postman documentation establishes Agent Mode model selection, but the UI observation alone does not establish an external model endpoint.",
+      evidence: "Observed by the user in the Postman Agent Mode model selector. Postman documents Agent Mode model selection, but the UI observation alone does not establish an external model endpoint.",
     },
   ];
 
@@ -157,9 +166,12 @@ export async function discover(): Promise<DiscoveryReport> {
         : "Postman API reachability or configuration could not be verified.",
     protocolReadyCount > 0
       ? `${protocolReadyCount} Postman MCP endpoint(s) completed an MCP initialize + tools/list handshake.`
-      : "No Postman MCP endpoint completed an authenticated MCP initialize + tools/list handshake.",
-    "The US remote MCP server supports OAuth; this CLI does not initiate an interactive OAuth browser flow during discovery. If no API key is supplied, US MCP authentication remains an explicit unknown/unauthenticated state.",
-    "Agent Mode model visibility is recorded as account evidence only. External model callability is not claimed unless a supported API/MCP/Flows path actually verifies it.",
+      : "No Postman MCP endpoint completed an MCP initialize + tools/list handshake with the configured authentication path.",
+    "The US remote MCP server supports OAuth, while the EU remote server requires a Postman API key. This CLI does not initiate an interactive OAuth browser flow during discovery.",
+    learnConfiguration.status === "unknown"
+      ? "The documented Learn MCP configuration is acknowledged but not probed because Postman's current remote endpoint table does not publish a distinct Learn URL."
+      : "Learn configuration was verified.",
+    "Agent Mode model visibility is recorded as account evidence only. External model callability is not claimed unless a supported API, MCP, or Flows path actually verifies it.",
   ];
 
   return {
@@ -170,6 +182,7 @@ export async function discover(): Promise<DiscoveryReport> {
     postmanCli,
     postmanApi,
     mcp,
+    learnConfiguration,
     environment: {
       postmanApiKeyConfigured: Boolean(apiKey),
       postmanApiBaseUrl: sanitizeBaseUrl(apiBaseUrl),
