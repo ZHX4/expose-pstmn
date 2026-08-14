@@ -4,7 +4,7 @@ A local integration gateway for exposing Postman AI capabilities to developer to
 
 > **Project status:** Phase 2 — Postman capability discovery.
 >
-> The repository foundation is complete. Phase 2 adds local discovery of the Postman CLI, authenticated Postman API access, documented Postman MCP endpoints, and recorded evidence for models observed in Agent Mode. It does not assume that Agent Mode models are externally callable.
+> The repository foundation is complete. Phase 2 adds capability discovery for Postman CLI, Postman API authentication, documented remote Postman MCP endpoints, and explicit evidence handling for models observed in Agent Mode. It does not claim that Agent Mode models are externally callable unless a supported path verifies that fact.
 
 ## Goals
 
@@ -35,8 +35,10 @@ The doctor checks:
 
 - Whether `postman` is available on `PATH` and reports its version.
 - Whether a `POSTMAN_API_KEY` is configured.
-- Whether the configured Postman API key is accepted by `GET /me`.
-- Whether the documented US and EU Postman MCP endpoints are reachable.
+- Whether the configured Postman API key is accepted by `GET /me` using Postman's documented `X-API-Key` authentication.
+- Whether all six currently documented remote Streamable HTTP MCP endpoints (US/EU × Minimal/Code/Full) can complete a real MCP `initialize` and `tools/list` handshake.
+- MCP authentication mode, HTTP result, initialization result, session establishment, and first-page tool count.
+- The documented Learn MCP configuration as an explicitly unprobed capability when no distinct remote Streamable HTTP endpoint is published by the current endpoint table.
 - The configured Postman API region/base URL without printing the API key.
 - Evidence for the two Agent Mode models observed in the user's account: `GPT-5.6 Sol` and `Claude Opus 4.8`.
 
@@ -44,15 +46,19 @@ The doctor checks:
 
 ```text
 POSTMAN_API_KEY
-POSTMAN_API_BASE_URL
+POSTMAN_API_BASE_URL=https://api.postman.com
 POSTMAN_REGION=eu
 ```
 
-`POSTMAN_API_KEY` is only sent to the Postman API as the `X-API-Key` header during the `/me` authentication check. Its value is never written to the discovery report.
+`POSTMAN_API_KEY` is sent to the Postman API as `X-API-Key` for `/me` and as a Bearer token for remote MCP checks. Its value is never written to the discovery report.
 
-`POSTMAN_API_BASE_URL` is optional. When omitted, the US Postman API base is used for the authentication check; set `POSTMAN_REGION=eu` to use the EU Postman API base.
+`POSTMAN_API_BASE_URL` is optional and is restricted to the official Postman API hosts `api.postman.com` and `api.eu.postman.com`. When omitted, the US API base is used; set `POSTMAN_REGION=eu` to use the EU API base.
 
-Discovery only reports what it can verify. In particular, seeing a model in Agent Mode does not by itself establish that the model can be called through the Postman API or MCP.
+The US remote MCP server supports OAuth as well as API-key authentication. The EU remote MCP server requires a Postman API key. `expose-pstmn doctor` does not initiate an interactive OAuth browser flow.
+
+Discovery only reports what it can verify. In particular, seeing a model in Agent Mode does not by itself establish that the model can be called through the Postman API, MCP, or Flows.
+
+See [docs/phase-2.md](docs/phase-2.md) for the complete Phase 2 verification matrix and limitations.
 
 ## Architecture direction
 
@@ -129,7 +135,7 @@ src/
 ├── api/            HTTP/OpenAI-compatible gateway (future)
 ├── auth/           Local gateway authentication (future)
 ├── config/         Configuration and environment handling (future)
-├── core/            Shared application logic and CLI
+├── core/           Shared application logic and CLI
 ├── discovery/      Phase 2 capability detection
 ├── providers/      Postman/provider adapters (future)
 └── protocols/      External protocol schemas and adapters (future)
